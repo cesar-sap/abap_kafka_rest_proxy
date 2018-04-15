@@ -8,7 +8,7 @@ This connector is intended to be run on SAP NetWeaver ABAP Systems. It has so fa
 
 ## How to install
 
-You need to have [abapGit](https://github.com/larshp/abapGit) installed in your system. Once you have abapGit correctly set-up, just clone it into the system following abapGit instructions.
+You need to have [abapGit](https://github.com/larshp/abapGit) installed in your system. Once you have abapGit correctly set-up, just [clone it](https://github.com/cesar-sap/abap_kafka_rest_proxy.git) into the system following abapGit instructions.
 
 
 
