@@ -16,6 +16,7 @@ public section.
   data TOPICS type STRING_TABLE .
   data CONSUMERS type ZKAFKA_CONSUMER_INSTANCE_TAB .
   data CONSUMER_TOPICS type ZKAFKA_CONSUMER_TOPICS_TAB .
+  data SLT_RQ type ref to DATA .
 
   methods DELETE_RQ .
   methods CONSTRUCTOR
@@ -52,6 +53,7 @@ public section.
       !UPCASE type XFELD optional
       !CAMELCASE type XFELD optional
       !ENCLOSED_IN_BRACES type XFELD optional
+      !DELETE_NULLS type XFELD optional
     returning
       value(JSON_STRING) type STRING .
   methods GET_JSON_RESPONSE
@@ -59,15 +61,28 @@ public section.
       !JSON_RESPONSE_TEXT type STRING
     changing
       !RESP_DATA type ANY .
+  methods ADD_SLT_RECORD
+    importing
+      !VALUE type ANY
+      !PARTITION type INT4 optional
+      !KEY type STRING optional
+      !TABLENAME type STRING
+      !OPERATION type STRING default 'I' .
   methods ADD_MESSAGE
     importing
-      !VALUE type ANY .
+      !VALUE type ANY
+      !PARTITION type INT4 optional
+      !KEY type STRING optional
+      !EX_DATATYPE type STRING optional .
   methods PRODUCE_ONE
     importing
       !TOPIC type STRING
       !MESSAGE_STR type STRING optional
       !VALUE type ANY optional
       !PARSE_JSON_RESPONSE type XFELD optional
+      !PARTITION type INT4 optional
+      !KEY type STRING optional
+      !EX_DATATYPE type STRING optional
     exporting
       !HTTP_STATUS_CODE type I
       !HTTP_STATUS_MESSAGE type STRING
@@ -133,6 +148,18 @@ public section.
       value(CONSUMER_URL) type STRING
     exceptions
       ERROR_IN_HTTP_SEND_CALL .
+  methods SET_OFFSET_POSITION
+    importing
+      !CONSUMER_NAME type STRING
+      !KAFKA_OFFSET_POS type ZKAFKA_OFFSET_POS_TAB
+    exporting
+      !HTTP_STATUS_CODE type I
+      !HTTP_STATUS_MESSAGE type STRING
+      !RESPONSE_TEXT type STRING
+      !KAFKA_ERROR_RESPONSE type ZKAFKA_ERROR_RESPONSE
+    exceptions
+      ERROR_IN_HTTP_SEND_CALL
+      UNEXISTING_CONSUMER .
   methods SUBSCRIBE_CONSUMER_TOPICS
     importing
       !CONSUMER_NAME type STRING
@@ -168,14 +195,28 @@ public section.
       !CONSUMER_NAME type STRING
       !TOPIC type STRING optional
       !VALUE_DATA_TYPE type STRING default 'STRING'
-      !MAX_BYTES type STRING default '120000'
+      !MAX_BYTES type INT4 default 120000
+      !FROM_OFFSET type INT8 optional
     exporting
       !HTTP_STATUS_CODE type I
       !HTTP_STATUS_MESSAGE type STRING
       !RESPONSE_TEXT type STRING
       !KAFKA_ERROR_RESPONSE type ZKAFKA_ERROR_RESPONSE
+      !LAST_READ_OFFSET type INT8
     returning
       value(RECORDS) type ZKAFKA_CONSUMER_RESPONSE_TAB
+    exceptions
+      ERROR_IN_HTTP_SEND_CALL .
+  methods GET_LAST_OFFSETS
+    importing
+      !TOPIC type STRING
+      !CONSUMER_NAME type STRING
+      !PARTITIONS type INT4_TABLE
+    exporting
+      !HTTP_STATUS_CODE type I
+      !HTTP_STATUS_MESSAGE type STRING
+      !RESPONSE_TEXT type STRING
+      !KAFKA_ERROR_RESPONSE type ZKAFKA_ERROR_RESPONSE
     exceptions
       ERROR_IN_HTTP_SEND_CALL .
 protected section.
@@ -441,11 +482,69 @@ endmethod.
     field-symbols <rq> type zkafka_value_record_tab.
 
     if value is not initial.
-      datadesc = cl_abap_typedescr=>DESCRIBE_BY_DATA( value ).
-      datatype = datadesc->GET_RELATIVE_NAME( ).
+      if ex_datatype is not initial.
+        datatype = ex_datatype.
+      else.
+        datadesc = cl_abap_typedescr=>DESCRIBE_BY_DATA( value ).
+        datatype = datadesc->GET_RELATIVE_NAME( ).
+      endif.
       create data dref type (datatype).
       get reference of value into dref.
       record-value = dref.
+      record-key = key.
+      record-partition = partition.
+      assign me->rq->* to <rq>.
+      append record to <rq>.
+    endif.
+
+  endmethod.
+
+
+  method ADD_SLT_RECORD.
+
+    data datadesc type ref to CL_ABAP_TYPEDESCR.
+    data datatype type string.
+    data dref type ref to data.
+    data vref type ref to data.
+    data record type zkafka_value_record.
+    data slt_record type ZKAFKA_SLT_TABLE_RECORD.
+    types: slt_record_tab type table of ZKAFKA_SLT_TABLE_RECORD.
+    field-symbols:
+      <rq>      type zkafka_value_record_tab,
+      <slt_rq>  type slt_record_tab,
+      <slt_rec> type ZKAFKA_SLT_TABLE_RECORD.
+
+    slt_record-abap_srcsys = sy-sysid.
+    slt_record-abap_tablename = tablename.
+    case operation.
+      when 'I'.
+        slt_record-operation = 'insert'.
+      when 'U'.
+        slt_record-operation = 'update'.
+      when 'D'.
+        slt_record-operation = 'delete'.
+    endcase.
+
+    if value is not initial.
+      if tablename is not initial.
+        datatype = tablename.
+      else.
+        datadesc = cl_abap_typedescr=>DESCRIBE_BY_DATA( value ).
+        datatype = datadesc->GET_RELATIVE_NAME( ).
+      endif.
+      create data vref type (datatype).
+      get reference of value into vref.
+      slt_record-payload = vref.
+      assign me->slt_rq->* to <slt_rq>.
+      append slt_record to <slt_rq>.
+
+      read table <slt_rq> index sy-tabix assigning <slt_rec>.
+
+      create data dref type ZKAFKA_SLT_TABLE_RECORD.
+      get reference of <slt_rec> into dref.
+      record-value = dref.
+      record-key = key.
+      record-partition = partition.
       assign me->rq->* to <rq>.
       append record to <rq>.
     endif.
@@ -463,6 +562,11 @@ method CONSTRUCTOR.
   create data rqref type zkafka_value_record_tab.
   me->rq = rqref.
 
+  types: slt_record_tab type table of zkafka_slt_table_record.
+  data sltrqref type ref to data.
+  create data sltrqref type slt_record_tab.
+  me->slt_rq = sltrqref.
+
 endmethod.
 
 
@@ -478,6 +582,7 @@ endmethod.
     data value type ref to data.
     data ffields type tihttpnvp.
     data ff type ihttpnvp.
+    data max_bytes_s type string.
 
     method = 'GET'.
     content_type = 'application/vnd.kafka.json.v2+json'.
@@ -497,8 +602,15 @@ endmethod.
     concatenate cons_instance-base_uri '/records' into url_final.
     condense url_final.
 
+    if max_bytes gt 800000.
+      " safely set it to 800000 bytes as maximum value. More wouln't bring any performance benefit and may put json2abap into trouble.
+      max_bytes_s = '800000'.
+    else.
+      max_bytes_s = max_bytes.
+    endif.
+    condense max_bytes_s.
     ff-name = 'max_bytes'.
-    ff-value = MAX_BYTES.
+    ff-value = MAX_BYTES_S.
     append ff to ffields.
 
     CALL METHOD ZCL_KAFKA_PROXY=>HTTP_SEND
@@ -532,8 +644,6 @@ endmethod.
       kafka_error_response-message = http_status_message.
 
       " process response
-*      create data value type (value_data_type).
-*      kfrecord-value = value.
       data dynf type ihttpnvp.
       data tdynf type tihttpnvp.
       dynf-name = 'VALUE'.
@@ -541,7 +651,8 @@ endmethod.
       append dynf to tdynf.
       me->json2abap( exporting json_string = response_text dyn_fields = tdynf  changing abap_data = records ).
 
-
+      read table records index lines( records ) into kfrecord.
+      last_read_offset = kfrecord-offset.
 
     else.
       me->get_json_response( exporting json_response_text = response_text
@@ -573,7 +684,8 @@ endmethod.
     assign component 'AUTO.OFFSET.RESET' of structure cons_params to <comp>.
     <comp> = 'earliest'. unassign <comp>.
     assign component 'AUTO.COMMIT.ENABLE' of structure cons_params to <comp>.
-    <comp> = 'false'.
+    <comp> = 'true'. " check this.
+*    <comp> = 'false'.
 
     pdata = me->abap2json( abap_data = cons_params ).
 
@@ -715,6 +827,90 @@ method GET_JSON_RESPONSE.
   exit.
 
 endmethod.
+
+
+  method GET_LAST_OFFSETS.
+
+    data content_type type string.
+    data method type string.
+    data url_final type string.
+    data pdata type string.
+    data cons_params type zkafka_consumer_create_params.
+    data cons_instance type zkafka_consumer_instance.
+    data kfrecord type zkafka_consumer_response.
+    data value type ref to data.
+    data ffields type tihttpnvp.
+    data ff type ihttpnvp.
+    data max_bytes_s type string.
+
+    method = 'GET'.
+    content_type = 'application/vnd.kafka.json.v2+json'.
+
+    read table me->consumers into cons_instance with key instance_id = consumer_name.
+    if sy-subrc ne 0.
+      if topic is not initial.
+        " create new consumer.
+        cons_instance-base_uri    = me->subscribe_consumer_topics(
+                                      consumer_name = consumer_name topic = topic ).
+        cons_instance-instance_id = consumer_name.
+      else.
+        exit.
+      endif.
+    endif.
+
+    concatenate cons_instance-base_uri '/offsets' into url_final.
+    condense url_final.
+
+
+    CALL METHOD ZCL_KAFKA_PROXY=>HTTP_SEND
+      EXPORTING
+        METHOD                 = method
+        URL                    = url_final
+*       URL                    = 'http://machost:8001/b64'
+*       CONTENT_TYPE           = content_type
+        ACCEPT_HEADER          = content_type
+        POST_DATA              = pdata
+        FORM_FIELDS            = ffields
+      IMPORTING
+        HTTP_STATUS_CODE       = HTTP_STATUS_CODE
+        HTTP_STATUS_MESSAGE    = HTTP_STATUS_MESSAGE
+        RESPONSE_TEXT          = RESPONSE_TEXT
+      EXCEPTIONS
+        SEND_ERROR             = 1
+        RECEIVE_ERROR          = 2
+        ERROR_CREATE_BY_URL    = 3
+        ERROR_CREATE_BY_DEST   = 4
+        PLEASE_SET_DESTINATION = 5
+        others                 = 6.
+    IF SY-SUBRC <> 0.
+      raise ERROR_IN_HTTP_SEND_CALL.
+    ENDIF.
+
+
+
+    if http_status_code eq 200. " consumption went well
+      kafka_error_response-error_code = http_status_code.
+      kafka_error_response-message = http_status_message.
+
+      " process response
+      data dynf type ihttpnvp.
+      data tdynf type tihttpnvp.
+      dynf-name = 'VALUE'.
+*ññ      dynf-value = value_data_type.
+      append dynf to tdynf.
+*ññ      me->json2abap( exporting json_string = response_text dyn_fields = tdynf  changing abap_data = records ).
+
+*ññ      read table records index lines( records ) into kfrecord.
+*ññ      last_read_offset = kfrecord-offset.
+
+    else.
+      me->get_json_response( exporting json_response_text = response_text
+                            changing resp_data = kafka_error_response ).
+    endif.
+
+
+
+  endmethod.
 
 
   method GET_TOPICS.
@@ -1161,11 +1357,17 @@ endmethod.
     if message_str is not initial.
       concatenate '{"records":[{"value":' message_str '}]}' into pdata.
     elseif value is not initial.
-      datadesc = cl_abap_typedescr=>DESCRIBE_BY_DATA( value ).
-      datatype = datadesc->GET_RELATIVE_NAME( ).
+      if ex_datatype is not initial.
+        datatype = ex_datatype.
+      else.
+        datadesc = cl_abap_typedescr=>DESCRIBE_BY_DATA( value ).
+        datatype = datadesc->GET_RELATIVE_NAME( ).
+      endif.
       create data dref type (datatype).
       get reference of value into dref.
       record-value = dref.
+      record-key = key.
+      record-partition = partition.
       append record to records.
       pdata = me->abap2json( name = 'records' abap_data = records enclosed_in_braces = 'X' ).
     endif.
@@ -1268,6 +1470,65 @@ endmethod.
                                changing resp_data = kafka_response ).
       endif.
     endif.
+
+  endmethod.
+
+
+  method SET_OFFSET_POSITION.
+
+    data content_type type string.
+    data method type string.
+    data url_final type string.
+    data pdata type string.
+    data cons_instance type zkafka_consumer_instance.
+
+    method = 'POST'.
+    content_type = 'application/vnd.kafka.json.v2+json'.
+
+    read table me->consumers into cons_instance with key instance_id = consumer_name.
+    if sy-subrc ne 0.
+      " create new consumer.
+      RAISE UNEXISTING_CONSUMER. " shouldn't happen, but will.
+            " may be first recreate the customer and subscription ???
+      exit. " rebuznante.
+    endif.
+
+    concatenate cons_instance-base_uri '/positions' into url_final.
+    condense url_final.
+
+    pdata = me->abap2json( abap_data = kafka_offset_pos name = 'offsets' enclosed_in_braces = 'X' ).
+
+    CALL METHOD ZCL_KAFKA_PROXY=>HTTP_SEND
+      EXPORTING
+        METHOD                 = method
+        URL                    = url_final
+        CONTENT_TYPE           = content_type
+        POST_DATA              = pdata
+      IMPORTING
+        HTTP_STATUS_CODE       = HTTP_STATUS_CODE
+        HTTP_STATUS_MESSAGE    = HTTP_STATUS_MESSAGE
+        RESPONSE_TEXT          = RESPONSE_TEXT
+      EXCEPTIONS
+        SEND_ERROR             = 1
+        RECEIVE_ERROR          = 2
+        ERROR_CREATE_BY_URL    = 3
+        ERROR_CREATE_BY_DEST   = 4
+        PLEASE_SET_DESTINATION = 5
+        others                 = 6.
+    IF SY-SUBRC <> 0.
+      raise ERROR_IN_HTTP_SEND_CALL.
+    ENDIF.
+
+
+
+    if http_status_code eq 204. " re position went well
+      kafka_error_response-error_code = http_status_code.
+      kafka_error_response-message = http_status_message.
+    else.
+      me->get_json_response( exporting json_response_text = response_text
+                            changing resp_data = kafka_error_response ).
+    endif.
+
 
   endmethod.
 

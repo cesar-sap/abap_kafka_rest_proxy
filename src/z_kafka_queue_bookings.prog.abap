@@ -28,7 +28,10 @@ parameters:
   airline like BAPISBOKEY-AIRLINEID,
   t_agency like BAPISBODAT-AGENCYNUM,
   c_number like BAPISCUKEY-CUSTOMERID,
-  max_rows like BAPISFLAUX-BAPIMAXROW.
+  max_rows like BAPISFLAUX-BAPIMAXROW,
+  topic type string default 'flbookings'.
+
+translate topic to lower case.
 
 select-options fl_date for <fs_booking>-flightdate.
 select-options bk_date for <fs_booking>-bookdate.
@@ -74,7 +77,7 @@ loop at t_bookings assigning <fs_booking>.
   endif.
 endloop.
 
-kafka_con->produce_queue( exporting topic = 'imanerd' parse_json_response = 'X'
+kafka_con->produce_queue( exporting topic = topic parse_json_response = 'X'
                           importing kafka_response = kafka_response ).
 add msgidx to total_sent.
 write:/ msgidx.
