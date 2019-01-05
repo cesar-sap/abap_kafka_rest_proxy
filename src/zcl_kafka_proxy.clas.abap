@@ -1428,7 +1428,7 @@ endmethod.
     concatenate me->url_base 'topics/' topic into url_final.
     condense url_final.
 
-    pdata = me->abap2json( name = 'records' abap_data = <rq> enclosed_in_braces = 'X').
+    pdata = me->abap2json( name = 'records' abap_data = <rq> enclosed_in_braces = 'X' ).
 
     if me->http_rfcdest is not initial.
     endif.
