@@ -57,7 +57,7 @@ CALL FUNCTION 'BAPI_FLBOOKING_GETLIST'
 CREATE OBJECT KAFKA_CON
   EXPORTING
 *    HTTP_RFC_DEST =
-    URL_BASE = 'http://machost:8082/'
+    URL_BASE = 'http://esmadhp2vm03.mad.sap.corp:8082/'
 *URL_BASE = 'http://esmadivm02.mad.sap.corp:8082/'
 *    URL_BASE = 'http://totoro.tritonas.net:8082/topics/'
 *    TOPIC = 'haymazodepocos'
@@ -70,7 +70,7 @@ loop at t_bookings assigning <fs_booking>.
   add 1 to msgidx.
   kafka_con->add_message( value = <fs_booking> ).
   if msgidx = queue_send_limit.
-    kafka_con->produce_queue( topic = 'imanerd' ).
+    kafka_con->produce_queue( topic = topic ).
     write:/ msgidx.
     add msgidx to total_sent.
     msgidx = 0.

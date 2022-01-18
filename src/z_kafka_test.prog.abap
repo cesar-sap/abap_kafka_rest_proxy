@@ -26,7 +26,8 @@ data recs type zkafka_consumer_response_tab.
 
 parameters:
   consumer type string default 'consu',
-  topic type string default 'imanerd',
+*  topic type string default 'flbookings',
+  topic type string default 'comunidades',
   offset type int8 default 0.
 
 translate topic to lower case.
@@ -34,7 +35,7 @@ translate topic to lower case.
 CREATE OBJECT KAFKA_CON
   EXPORTING
 *   HTTP_RFC_DEST =
-    URL_BASE = 'http://machost:8082/'
+    URL_BASE = 'http://esmadhp2vm03.mad.sap.corp:8082/'
 *   URL_BASE = 'http://localhost:8082/'
 *   URL_BASE = 'http://totoro.tritonas.net:8082/'
 *   TOPIC    = 'haymazodepocos'
@@ -64,7 +65,8 @@ wait up to 3 seconds.
 
 
 data respe type string.
-recs = kafka_con->consume( exporting consumer_name = consumer topic = topic value_data_type = 'BAPISBODAT' importing response_text = respe last_read_offset = last_offset ).
+*recs = kafka_con->consume( exporting consumer_name = consumer topic = topic value_data_type = 'BAPISBODAT' importing response_text = respe last_read_offset = last_offset ).
+recs = kafka_con->consume( exporting consumer_name = consumer topic = topic value_data_type = 'ZSVH_COMUNIDADES' importing response_text = respe last_read_offset = last_offset ).
 write:/ respe.
 write:/ last_offset.
 *

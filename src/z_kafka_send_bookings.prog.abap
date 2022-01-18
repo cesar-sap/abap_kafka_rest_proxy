@@ -52,7 +52,7 @@ CALL FUNCTION 'BAPI_FLBOOKING_GETLIST'
 CREATE OBJECT KAFKA_CON
   EXPORTING
 *    HTTP_RFC_DEST =
-    URL_BASE = 'http://machost:8082/'
+    URL_BASE = 'http://esmadhp2vm03.mad.sap.corp:8082/'
 *    TOPIC = 'haymazodepocos'
 *    OFFSET = '0'
    .
@@ -60,7 +60,7 @@ CREATE OBJECT KAFKA_CON
 loop at t_bookings assigning <fs_booking>.
   add 1 to msgidx.
   idxstr = msgidx.
-  kafka_con->produce_one( topic = 'imanerd' value = <fs_booking> ).
+  kafka_con->produce_one( topic = 'flbookings' value = <fs_booking> ).
 endloop.
 
 write: idxstr.
